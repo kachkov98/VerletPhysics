@@ -4,13 +4,18 @@
 @author Sergei Kachkov
 */
 #pragma once
-#include <gl\freeglut.h>
+#include <GL/freeglut.h>
 #include "vector.h"
 #include "boundingbox.h"
 
 /**
 @class
 @brief implements world movement and transformation of coordinates
+top has coordinate center.y + scale
+bottom has coordinate center.y - scale
+left has coordinate center.x - scale * aspect_ratio
+right has coordinate center.x + scale * aspect_ratio
+left has coordinate
 */
 struct Camera
 {
@@ -26,6 +31,10 @@ struct Camera
 	@return world right-sided coordinates
 	*/
 	vector2d ToWorld (int x, int y);
+	/**
+	@brief sets viewport and modelview matrix
+	*/
+	void SetMatrix ();
 };
 extern Camera camera;
 
@@ -85,9 +94,4 @@ public:
 	@brief present back buffer and execute all deferred opengl commands
 	*/
 	void Present ();
-	/**
-	@brief sets viewport and modelview matrix
-	@todo more logical to put this method in Camera class, but it needs current width and height
-	*/
-	void SetMatrix ();
 };

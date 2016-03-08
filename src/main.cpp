@@ -4,11 +4,13 @@
 @author Sergei Kachkov
 */
 
+#include <stdio.h>
 #include "physics.h"
 #include "window.h"
+#include "loader.h"
 
 double timestep = 0.002;
-Physics world (timestep, vector2d (0, -9.8), BoundingBox (vector2d(-100, -100), vector2d(100, 100)));
+Physics world (timestep, vector2d (0, -30), BoundingBox (vector2d(-100, -100), vector2d(100, 100)));
 
 /**
 @brief Sets OpenGL parameters and generates physics objects
@@ -20,17 +22,11 @@ void init ()
 	glEnable (GL_POINT_SMOOTH);
 	glPointSize (2.0);
 
-	//generate world
-	world.AddStaticBody (4, vector2d (-5.0, -1.2), vector2d (-5.0, -1.0), vector2d (5.0, -1.0), vector2d (5.0, -1.2));
-	world.AddStaticBody (4, vector2d (-5.0, -1.2), vector2d (-5.2, -1.2), vector2d (-5.2, 2.0), vector2d (-5.0, 2.0));
-	world.AddStaticBody (4, vector2d (5.0, -1.2), vector2d (5.2, -1.2), vector2d (5.2, 2.0), vector2d (5.0, 2.0));
-
-	for (int i = -2; i <= 2; i+=2)
-		world.AddStaticBody (5, vector2d (0.0 + i, 1.0),  vector2d (0.5 + i, 0.5),
-							    vector2d (-0.5 + i, 0.5), vector2d (0.5 + i, 0.0), vector2d (-0.5 + i, 0.0));
+	//load world
+	load_scene (&world, "scene.txt");
 
 	for (double i = -1.5; i <= 1.5; i+=1.5)
-		world.AddDynamicBody (0.2, 3, Point (vector2d (i - 0.4, 2.0 - 0.2), 1.0),
+		world.AddDynamicBody (0.1, 3, Point (vector2d (i - 0.4, 2.0 - 0.2), 1.0),
 							  Point (vector2d (i + 0.4, 2.0 - 0.2), 1.0),
 							  Point (vector2d (i, 2.0 + 0.4), 1.0));
 }
@@ -121,7 +117,7 @@ bool input (Window *window)
 	{
 		is_add = false;
 		vector2d center = camera.ToWorld (mouse.x, mouse.y);
-		world.AddDynamicBody (0.2, 4, Point (center + vector2d (-0.25, -0.25), 1.0),
+		world.AddDynamicBody (0.1, 4, Point (center + vector2d (-0.25, -0.25), 1.0),
 							  Point (center + vector2d (0.25, -0.25), 1.0),
 							  Point (center + vector2d (0.25, 0.25), 1.0),
 							  Point (center + vector2d (-0.25, 0.25), 1.0));
@@ -163,10 +159,10 @@ void render ()
 			glBegin (GL_LINES);
 			for (size_t j = 0; j < world.DynamicBodies[i].poles.size (); j++)
 			{
-				glVertex2d (world.DynamicBodies[i].poles[j].p1->cur_pos.x,
-							world.DynamicBodies[i].poles[j].p1->cur_pos.y);
-				glVertex2d (world.DynamicBodies[i].poles[j].p2->cur_pos.x,
-							world.DynamicBodies[i].poles[j].p2->cur_pos.y);
+				glVertex2d (world.DynamicBodies[i].points[world.DynamicBodies[i].poles[j].p1].cur_pos.x,
+							world.DynamicBodies[i].points[world.DynamicBodies[i].poles[j].p1].cur_pos.y);
+				glVertex2d (world.DynamicBodies[i].points[world.DynamicBodies[i].poles[j].p2].cur_pos.x,
+							world.DynamicBodies[i].points[world.DynamicBodies[i].poles[j].p2].cur_pos.y);
 			}
 			glEnd ();
 
@@ -207,12 +203,12 @@ int main (int argc, char *argv[])
 		if (!input (&window))
 			break;
 
-		window.SetMatrix ();
-		world.Update (10);
+		camera.SetMatrix ();
+		world.Update (1);
 		render ();
 		char str[50];
 		sprintf (str, "Time in ms: %d", glutGet (GLUT_ELAPSED_TIME) - oldTime);
-		while (glutGet (GLUT_ELAPSED_TIME) - oldTime < timestep * 1000);
+		while (glutGet (GLUT_ELAPSED_TIME) - oldTime <= timestep * 1000);
 		Print ((unsigned char *)str, 10, 20, 1.0, 1.0, 1.0);
 		window.Present ();
 	}

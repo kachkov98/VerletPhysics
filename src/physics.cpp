@@ -3,9 +3,28 @@
 @brief implementation of physics framework
 @author Sergei Kachkov
 */
+#include <stdlib.h>
 #include <stdarg.h>
 #include "physics.h"
 #include "log.h"
+
+const double max_depth = 0.01;
+
+struct Edge
+{
+	std::vector<Point>::iterator p1, p2;
+};
+
+struct CollisionInfo
+{
+	double depth;
+	vector2d normal;
+	Edge edge;
+	std::vector<Point>::iterator point;
+	size_t edge_body, point_body;
+	vector2d static_point;
+	bool is_point;
+}info;
 
 //----------implementation of point------------------------
 Point::Point (vector2d position, double mass) :
@@ -26,30 +45,11 @@ void Point::Update (double timestep, vector2d gravity)
 //----------end of implementation of point------------------
 
 //----------impementation of pole---------------------------
-Pole::Pole (std::vector<Point>::iterator point1, std::vector<Point>::iterator point2, double length) :
+Pole::Pole (size_t point1, size_t point2, double length) :
 	p1 (point1),
 	p2 (point2),
 	len (length)
 {
-}
-
-Pole::Pole (std::vector<Point>::iterator point1, std::vector<Point>::iterator point2) :
-	p1 (point1),
-	p2 (point2)
-{
-	len = (p1->cur_pos - p2->cur_pos).len ();
-}
-
-void Pole::Update (double k)
-{
-	double inv_mass = 1 / (p1->m + p2->m);
-	vector2d mass_center = (p1->cur_pos * p1->m + p2->cur_pos * p2->m) * inv_mass;
-	vector2d norm = (p2->cur_pos - p1->cur_pos).norm ();
-	//positions where points should be by spring non-stretched length
-	vector2d goal1 = mass_center - norm * len * (p2->m) * inv_mass;
-	vector2d goal2 = mass_center + norm * len * (p1->m) * inv_mass;
-	p1->cur_pos += (goal1 - p1->cur_pos) * k;
-	p2->cur_pos += (goal2 - p2->cur_pos) * k;
 }
 //----------end of implementation of pole-------------------
 
@@ -121,10 +121,12 @@ void DynamicBody::CalculateEdges ()
 	poles.clear ();
 	for (size_t i = 0; i < points.size (); i++)
 	{
-		edges.push_back (Pole (points.begin () + i, points.begin () + (i + 1) % points.size ()));
-		for (size_t j = i + 1; j < points.size (); j++)
-			poles.push_back (Pole (points.begin () + i, points.begin () + j));
+		edges.push_back (Pole (i, (i + 1) % points.size (),
+							   (points[i].cur_pos - points[(i + 1) % points.size ()].cur_pos).len ()));
 	}
+	for (size_t i = 0; i < points.size () - 3; i++)
+		for (size_t j = 0; j < points.size () - i - 2; j++)
+			poles.push_back (Pole (j, i + j + 2, (points[j].cur_pos - points[i + j + 2].cur_pos).len ()));
 }
 
 void DynamicBody::AddDynamicPoint (Point point)
@@ -151,6 +153,36 @@ void DynamicBody::ProjectToAxis (vector2d axis, double *min, double *max)
 			*max = projection;
 		if (*min > projection)
 			*min = projection;
+	}
+}
+
+void DynamicBody::UpdatePoles ()
+{
+	//poles
+	for (size_t i = 0; i < poles.size (); i++)
+	{
+		double inv_mass = 1 / (points[poles[i].p1].m + points[poles[i].p2].m);
+		vector2d mass_center = (points[poles[i].p1].cur_pos * points[poles[i].p1].m +
+								points[poles[i].p2].cur_pos * points[poles[i].p2].m) * inv_mass;
+		vector2d norm = (points[poles[i].p2].cur_pos - points[poles[i].p1].cur_pos).norm ();
+		//positions where points should be by spring non-stretched length
+		vector2d goal1 = mass_center - norm * poles[i].len * points[poles[i].p2].m * inv_mass;
+		vector2d goal2 = mass_center + norm * poles[i].len * points[poles[i].p1].m * inv_mass;
+		points[poles[i].p1].cur_pos += (goal1 - points[poles[i].p1].cur_pos) * stiffness;
+		points[poles[i].p2].cur_pos += (goal2 - points[poles[i].p2].cur_pos) * stiffness;
+	}
+	//edges
+	for (size_t i = 0; i < edges.size (); i++)
+	{
+		double inv_mass = 1 / (points[edges[i].p1].m + points[edges[i].p2].m);
+		vector2d mass_center = (points[edges[i].p1].cur_pos * points[edges[i].p1].m +
+								points[edges[i].p2].cur_pos * points[edges[i].p2].m) * inv_mass;
+		vector2d norm = (points[edges[i].p2].cur_pos - points[edges[i].p1].cur_pos).norm ();
+		//positions where points should be by spring non-stretched length
+		vector2d goal1 = mass_center - norm * edges[i].len * points[edges[i].p2].m * inv_mass;
+		vector2d goal2 = mass_center + norm * edges[i].len * points[edges[i].p1].m * inv_mass;
+		points[edges[i].p1].cur_pos += (goal1 - points[edges[i].p1].cur_pos) * stiffness;
+		points[edges[i].p2].cur_pos += (goal2 - points[edges[i].p2].cur_pos) * stiffness;
 	}
 }
 //----------end of implementation of dynamic body-----------
@@ -234,20 +266,28 @@ size_t Physics::AddDynamicBody (double stiffness, size_t points_num, ...)
 	return DynamicBodies.size () - 1;
 }
 
-bool Physics::isDynamicDynamic (size_t first, size_t second, CollisionInfo *info)
+bool Physics::isDynamicDynamic (size_t first, size_t second)
 {
 	size_t vertex_body = 0;
-	info->depth = DBL_MAX;
+	info.depth = DBL_MAX;
 	for (size_t i = 0; i < DynamicBodies[first].edges.size () + DynamicBodies[second].edges.size (); i++)
 	{
-		std::vector<Pole>::iterator edge;
+		Edge edge;
 		if (i < DynamicBodies[first].edges.size ())
-			edge = DynamicBodies[first].edges.begin () + i;
+		{
+			edge.p1 = DynamicBodies[first].points.begin () + DynamicBodies[first].edges[i].p1;
+			edge.p2 = DynamicBodies[first].points.begin () + DynamicBodies[first].edges[i].p2;
+		}
 		else
-			edge = DynamicBodies[second].edges.begin () + (i - DynamicBodies[first].edges.size ());
+		{
+			edge.p1 = DynamicBodies[second].points.begin () + 
+				DynamicBodies[second].edges[i - DynamicBodies[first].edges.size ()].p1;
+			edge.p2 = DynamicBodies[second].points.begin () +
+				DynamicBodies[second].edges[i - DynamicBodies[first].edges.size ()].p2;
+		}
 
-		vector2d axis (edge->p2->cur_pos.y - edge->p1->cur_pos.y,
-					   edge->p1->cur_pos.x - edge->p2->cur_pos.x);
+		vector2d axis (edge.p2->cur_pos.y - edge.p1->cur_pos.y,
+					   edge.p1->cur_pos.x - edge.p2->cur_pos.x);
 		axis = axis.norm ();
 
 		double first_min, first_max, second_min, second_max;
@@ -258,34 +298,36 @@ bool Physics::isDynamicDynamic (size_t first, size_t second, CollisionInfo *info
 
 		if (distance > -DBL_MIN)
 			return false;
-		else if (abs (distance) < info->depth)
+		else if (abs (distance) < info.depth)
 		{
-			info->depth = -distance;
-			info->normal = axis;
-			info->edge = edge;
+			info.depth = -distance;
+			info.normal = axis;
+			info.edge = edge;
 			vertex_body = (i < DynamicBodies[first].edges.size ()) ? second : first;
 		}
 	}
-	info->point = DynamicBodies[vertex_body].points.begin ();
+	info.point = DynamicBodies[vertex_body].points.begin ();
 	for (size_t i = 1; i < DynamicBodies[vertex_body].points.size (); i++)
-		if ((info->normal ^ DynamicBodies[vertex_body].points[i].cur_pos) < (info->normal ^ info->point->cur_pos))
-			info->point = DynamicBodies[vertex_body].points.begin () + i;
-	info->point_body = vertex_body;
-	info->edge_body = first + second - vertex_body;
+		if ((info.normal ^ DynamicBodies[vertex_body].points[i].cur_pos) < (info.normal ^ info.point->cur_pos))
+			info.point = DynamicBodies[vertex_body].points.begin () + i;
+	info.point_body = vertex_body;
+	info.edge_body = first + second - vertex_body;
 	return true;
 }
 
-bool Physics::isDynamicStatic (size_t dynamic_body, size_t static_body, CollisionInfo *info)
+bool Physics::isDynamicStatic (size_t dynamic_body, size_t static_body)
 {
-	info->depth = DBL_MAX;
-	info->is_point = false;
+	info.depth = DBL_MAX;
+	info.is_point = false;
 	//edges of dynamic body
 	for (size_t i = 0; i < DynamicBodies[dynamic_body].edges.size (); i++)
 	{
-		std::vector<Pole>::iterator edge = DynamicBodies[dynamic_body].edges.begin () + i;
+		Edge edge;
+		edge.p1 = DynamicBodies[dynamic_body].points.begin () + DynamicBodies[dynamic_body].edges[i].p1;
+		edge.p2 = DynamicBodies[dynamic_body].points.begin () + DynamicBodies[dynamic_body].edges[i].p2;
 
-		vector2d axis (edge->p2->cur_pos.y - edge->p1->cur_pos.y,
-					   edge->p1->cur_pos.x - edge->p2->cur_pos.x);
+		vector2d axis (edge.p2->cur_pos.y - edge.p1->cur_pos.y,
+					   edge.p1->cur_pos.x - edge.p2->cur_pos.x);
 		axis = axis.norm ();
 
 		double first_min, first_max, second_min, second_max;
@@ -296,11 +338,11 @@ bool Physics::isDynamicStatic (size_t dynamic_body, size_t static_body, Collisio
 
 		if (distance > -DBL_MIN)
 			return false;
-		else if (abs (distance) < info->depth)
+		else if (abs (distance) < info.depth)
 		{
-			info->depth = -distance;
-			info->normal = (second_max > first_max) ? axis : axis * (-1);;
-			info->edge = edge;
+			info.depth = -distance;
+			info.normal = (second_max > first_max) ? axis : axis * (-1);;
+			info.edge = edge;
 		}
 	}
 	//edges of static body
@@ -320,27 +362,27 @@ bool Physics::isDynamicStatic (size_t dynamic_body, size_t static_body, Collisio
 
 		if (distance > -DBL_MIN)
 			return false;
-		else if (abs (distance) < info->depth)
+		else if (abs (distance) < info.depth)
 		{
-			info->depth = -distance;
-			info->normal = (first_max > second_max)? axis : axis * (-1);
-			info->is_point = true;
+			info.depth = -distance;
+			info.normal = (first_max > second_max)? axis : axis * (-1);
+			info.is_point = true;
 		}
 	}
 
-	if (info->is_point)
+	if (info.is_point)
 	{
-		info->point = DynamicBodies[dynamic_body].points.begin ();
+		info.point = DynamicBodies[dynamic_body].points.begin ();
 		for (size_t i = 1; i < DynamicBodies[dynamic_body].points.size (); i++)
-			if ((info->normal ^ DynamicBodies[dynamic_body].points[i].cur_pos) < (info->normal ^ info->point->cur_pos))
-				info->point = DynamicBodies[dynamic_body].points.begin () + i;
+			if ((info.normal ^ DynamicBodies[dynamic_body].points[i].cur_pos) < (info.normal ^ info.point->cur_pos))
+				info.point = DynamicBodies[dynamic_body].points.begin () + i;
 	}
 	else
 	{
-		info->static_point = StaticBodies[static_body].points[0];
+		info.static_point = StaticBodies[static_body].points[0];
 		for (size_t i = 1; i < StaticBodies[static_body].points.size (); i++)
-			if ((info->normal ^ StaticBodies[static_body].points[i]) < (info->normal ^ info->static_point))
-				info->static_point = StaticBodies[static_body].points[i];
+			if ((info.normal ^ StaticBodies[static_body].points[i]) < (info.normal ^ info.static_point))
+				info.static_point = StaticBodies[static_body].points[i];
 	}
 	return true;
 }
@@ -353,15 +395,14 @@ void Physics::Update (unsigned int iterations)
 		for (size_t j = 0; j < DynamicBodies[i].points.size (); j++)
 			DynamicBodies[i].points[j].Update (t, a);
 
-		for (size_t j = 0; j < DynamicBodies[i].poles.size (); j++)
-			DynamicBodies[i].poles[j].Update (DynamicBodies[i].stiffness);
-
-		for (size_t j = 0; j < DynamicBodies[i].edges.size (); j++)
-			DynamicBodies[i].edges[j].Update (DynamicBodies[i].stiffness);
+		DynamicBodies[i].UpdatePoles ();
 
 		DynamicBodies[i].RecalculateBBox ();
 		if (!(DynamicBodies[i].bbox * world_box))
+		{
 			DynamicBodies.erase (DynamicBodies.begin () + i);
+			log (LOG_INFO, "dynamic body destroyed");
+		}
 	}
 
 	//2nd step: collision detection
@@ -372,18 +413,20 @@ void Physics::Update (unsigned int iterations)
 			//dynamic - dynamic
 			for (size_t j = i + 1; j < DynamicBodies.size (); j++)
 				if (DynamicBodies[i].bbox * DynamicBodies[j].bbox)
-					if (isDynamicDynamic (i, j, &info))
+					if (isDynamicDynamic (i, j))
 					{
 						// collision responce
 						double sum_mass = DynamicBodies[info.edge_body].mass + DynamicBodies[info.point_body].mass;
+						if (info.depth > max_depth)
+							info.depth = max_depth;
 						info.point->cur_pos += info.normal * info.depth * (DynamicBodies[info.edge_body].mass / sum_mass);
 
-						double t = (info.point->cur_pos - info.edge->p1->cur_pos).len () * info.edge->p1->m /
-							((info.point->cur_pos - info.edge->p1->cur_pos).len () * info.edge->p1->m +
-							 (info.point->cur_pos - info.edge->p2->cur_pos).len () * info.edge->p2->m);
+						double t = (info.point->cur_pos - info.edge.p1->cur_pos).len () * info.edge.p1->m /
+							((info.point->cur_pos - info.edge.p1->cur_pos).len () * info.edge.p1->m +
+							 (info.point->cur_pos - info.edge.p2->cur_pos).len () * info.edge.p2->m);
 						double lambda = 1.0 / (t * t + (1 - t) * (1 - t));
-						info.edge->p1->cur_pos -= info.normal * info.depth * (1 - t) * 0.5 * lambda;
-						info.edge->p2->cur_pos -= info.normal * info.depth * t * 0.5 * lambda;
+						info.edge.p1->cur_pos -= info.normal * info.depth * (1 - t) * 0.5 * lambda;
+						info.edge.p2->cur_pos -= info.normal * info.depth * t * 0.5 * lambda;
 
 						DynamicBodies[i].RecalculateBBox ();
 						DynamicBodies[j].RecalculateBBox ();
@@ -391,19 +434,21 @@ void Physics::Update (unsigned int iterations)
 			//dynamic - static
 			for (size_t j = 0; j < StaticBodies.size (); j++)
 				if (DynamicBodies[i].bbox * StaticBodies[j].bbox)
-					if (isDynamicStatic (i, j, &info))
+					if (isDynamicStatic (i, j))
 					{
 						// collision responce
+						if (info.depth > max_depth)
+							info.depth = max_depth;
 						if (info.is_point)
 							info.point->cur_pos += info.normal * info.depth;
 						else
 						{
-							double t = (info.static_point - info.edge->p1->cur_pos).len() * info.edge->p1->m /
-								((info.edge->p1->cur_pos - info.static_point).len () * info.edge->p1->m +
-								 (info.edge->p2->cur_pos - info.static_point).len () * info.edge->p2->m);
+							double t = (info.static_point - info.edge.p1->cur_pos).len() * info.edge.p1->m /
+								((info.edge.p1->cur_pos - info.static_point).len () * info.edge.p1->m +
+								 (info.edge.p2->cur_pos - info.static_point).len () * info.edge.p2->m);
 							double lambda = 1.0 / (t * t + (1 - t) * (1 - t));
-							info.edge->p1->cur_pos -= info.normal * info.depth * (1-t) * lambda;
-							info.edge->p2->cur_pos -= info.normal * info.depth * t * lambda;
+							info.edge.p1->cur_pos -= info.normal * info.depth * (1-t) * lambda;
+							info.edge.p2->cur_pos -= info.normal * info.depth * t * lambda;
 						}
 						DynamicBodies[i].RecalculateBBox ();
 					}

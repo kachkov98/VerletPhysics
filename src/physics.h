@@ -12,13 +12,10 @@
 @class
 @brief mass point
 */
-class Point
+struct Point
 {
-private:
-	vector2d old_pos;
-public:
 	double m;
-	vector2d cur_pos;
+	vector2d old_pos, cur_pos;
 
 	/**
 	@brief constructor of mass point
@@ -41,29 +38,17 @@ public:
 @brief spring object
 @warning not physical-accurately; approximation of damped oscillations
 */
-class Pole
+struct Pole
 {
-private:
-	double len;
 public:
-	std::vector<Point>::iterator p1, p2;
+	size_t p1, p2;
+	double len;
 	/**
 	@brief constructor of point
 	@param point1, point2 iterators to points that should be connected
 	@param length length of non-stretched pole
 	*/
-	Pole (std::vector<Point>::iterator point1, std::vector<Point>::iterator point2, double length);
-	/**
-	@brief constructor of point
-	@param point1, point2 iterators to points that should be connected
-	@note non-stretched length of pole calculates automatically
-	*/
-	Pole (std::vector<Point>::iterator point1, std::vector<Point>::iterator point2);
-	/**
-	@brief updates position of points that connected to pole
-	@param stiffness stiffness of spring
-	*/
-	void Update (double stiffness);
+	Pole (size_t point1, size_t point2, double length);
 };
 
 /**
@@ -129,17 +114,10 @@ public:
 	@param min, max pointers to variables of projection coordinates
 	*/
 	void ProjectToAxis (vector2d axis, double *min, double *max);
-};
-
-struct CollisionInfo
-{
-	double depth;
-	vector2d normal;
-	std::vector<Pole>::iterator edge;
-	std::vector<Point>::iterator point;
-	size_t edge_body, point_body;
-	vector2d static_point;
-	bool is_point;
+	/**
+	@brief updates all poles and edges
+	*/
+	void UpdatePoles ();
 };
 
 /**
@@ -152,21 +130,20 @@ private:
 	double t;
 	vector2d a;
 	BoundingBox world_box;
-	CollisionInfo info;
 	/**
 	@brief collision detection between dynamic bodies
 	@param first, second indexes of bodies
 	@param info collision information if bodies intersect
 	@return true, if shapes intersect
 	*/
-	bool isDynamicDynamic (size_t first, size_t second, CollisionInfo *info);
+	bool isDynamicDynamic (size_t first, size_t second);
 	/**
 	@brief collision detection between static and dynamic bodies
 	@param dynamic_body, static_body indexes of bodies
 	@param info collision information if bodies intersect
 	@return true, if shapes intersect
 	*/
-	bool isDynamicStatic (size_t dynamic_body, size_t static_body, CollisionInfo *info);
+	bool isDynamicStatic (size_t dynamic_body, size_t static_body);
 public:
 	std::vector<StaticBody> StaticBodies;
 	std::vector<DynamicBody> DynamicBodies;

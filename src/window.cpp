@@ -20,6 +20,19 @@ vector2d Camera::ToWorld (int x, int y)
 					 center.y - scale * (1 - (height - y) * 2 / (double) height));
 }
 
+void Camera::SetMatrix ()
+{
+	glMatrixMode (GL_PROJECTION);
+	glLoadIdentity ();
+	glViewport (0, 0, camera.width, camera.height);
+	camera.view_field.lb = vector2d (camera.center.x - camera.scale * camera.aspect_ratio,
+									 camera.center.y - camera.scale);
+	camera.view_field.rt = vector2d (camera.center.x + camera.scale * camera.aspect_ratio,
+									 camera.center.y + camera.scale);
+	gluOrtho2D (camera.view_field.lb.x, camera.view_field.rt.x,
+				camera.view_field.lb.y, camera.view_field.rt.y);
+}
+
 //-------------------------------Callback functions------------------------------
 
 /* this function doesn't do any important, because application forcedly redraw window in loop; 
@@ -96,6 +109,7 @@ Window::Window (int *argc, char *argv[], int window_width, int window_height, co
 	camera.width = window_width;
 	camera.height = window_height;
 	is_close = false;
+	camera.center = vector2d (0, 2.0);
 	camera.scale = 5.0;
 	//init keyboard
 	for (int i = 0; i < 256; i++)
@@ -150,19 +164,6 @@ void Window::Present ()
 {
 	glutSwapBuffers ();
 	glFinish ();
-}
-
-void Window::SetMatrix ()
-{
-	glMatrixMode (GL_PROJECTION);
-	glLoadIdentity ();
-	glViewport (0, 0, camera.width, camera.height);
-	camera.view_field.lb = vector2d (camera.center.x - camera.scale * camera.aspect_ratio,
-									 camera.center.y - camera.scale);
-	camera.view_field.rt = vector2d (camera.center.x + camera.scale * camera.aspect_ratio,
-									 camera.center.y + camera.scale);
-	gluOrtho2D (camera.view_field.lb.x, camera.view_field.rt.x,
-				camera.view_field.lb.y, camera.view_field.rt.y);
 }
 //-----------------end of implementation of window class-------------------------
 
